@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>لوحة مزوّد المزامنة</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#EDF1EF;color:#15332D;font-family:Tahoma,"Noto Naskh Arabic",Arial,sans-serif;font-size:15px;line-height:1.55}
+main{max-width:900px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:6px 0 14px}
+h2{font-size:16px;margin:0 0 10px}
+.card{background:#fff;border:1px solid #D6DDD9;border-radius:10px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:13px;color:#5A6B66;margin-bottom:3px}
+input{width:100%;padding:9px 10px;border:1px solid #D6DDD9;border-radius:8px;min-height:42px;font-size:15px}
+.row{display:flex;flex-wrap:wrap;margin:0 -5px}
+.row>div{flex:1 1 200px;margin:0 5px 10px}
+button{border:1px solid #D6DDD9;background:#fff;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer}
+button.p{background:#1F4FA8;border-color:#1F4FA8;color:#fff}
+button.d{color:#B3402E;border-color:#E3B6AC}
+.ltr{direction:ltr;unicode-bidi:isolate;display:inline-block;font-family:monospace}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 6px;border-bottom:1px solid #D6DDD9;text-align:right;font-size:14px;vertical-align:middle}
+th{font-size:12.5px;color:#5A6B66;font-weight:500}
+.scroll{overflow-x:auto}
+.ok{color:#1B7A4B}.bad{color:#B3402E}
+.box{background:#E1F2E9;border:1px solid #BDDFCC;border-radius:10px;padding:12px;margin-top:10px}
+.box .big{font-size:20px;font-weight:700;letter-spacing:1px}
+.msg{padding:8px 12px;border-radius:8px;margin-bottom:10px;background:#FFF1D1;border:1px solid #EBD08F;display:none}
+small{color:#5A6B66}
+</style>
+</head>
+<body>
+<main>
+  <h1>لوحة مزوّد المزامنة</h1>
+  <div class="msg" id="msg"></div>
+
+  <div class="card">
+    <h2>الاتصال بالخادم</h2>
+    <div class="row">
+      <div><label for="url">عنوان الخادم</label><input id="url" dir="ltr" placeholder="https://shop-sync.xxxx.workers.dev"></div>
+      <div><label for="sec">كلمة سر المزوّد (ADMIN_SECRET)</label><input id="sec" type="password" dir="ltr" autocomplete="off"></div>
+    </div>
+    <button class="p" id="connect">اتصال وعرض المتاجر</button>
+    <small> تُحفظ هذه البيانات في هذه الجلسة فقط ولا تُرسل لأي جهة غير خادمك.</small>
+  </div>
+
+  <div class="card">
+    <h2>إنشاء متجر جديد</h2>
+    <div class="row">
+      <div><label for="nm">اسم المتجر</label><input id="nm"></div>
+      <div><label for="md">أقصى عدد أجهزة</label><input id="md" type="number" min="1" max="100" value="5"></div>
+    </div>
+    <button class="p" id="create">إنشاء</button>
+    <div class="box" id="created" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>المتاجر</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>الرمز</th><th>الاسم</th><th>الحالة</th><th>الأجهزة</th><th>السجلات</th><th>آخر مزامنة</th><th>إجراءات</th></tr></thead>
+      <tbody id="list"><tr><td colspan="7"><small>اتصل بالخادم لعرض المتاجر.</small></td></tr></tbody>
+    </table></div>
+  </div>
+</main>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var url = sessionStorage.getItem("sy_url") || "", sec = sessionStorage.getItem("sy_sec") || "";
+  $("url").value = url; $("sec").value = sec;
+
+  function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  function msg(t){ var m = $("msg"); m.textContent = t; m.style.display = t ? "block" : "none"; }
+  function conf(){
+    url = $("url").value.trim().replace(/\/+$/, ""); sec = $("sec").value;
+    sessionStorage.setItem("sy_url", url); sessionStorage.setItem("sy_sec", sec);
+  }
+  function api(path, body){
+    return fetch(url + path, {
+      method: body ? "POST" : "GET",
+      headers: {"Authorization": "Bearer " + sec, "Content-Type": "application/json"},
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error || r.status); return j; }); });
+  }
+  function fail(e){ msg(e.message === "unauthorized" ? "كلمة سر المزوّد غير صحيحة." : "تعذر الاتصال بالخادم: " + e.message); }
+  function when(ts){ return ts ? new Date(ts).toLocaleString("ar-EG-u-nu-latn") : "—"; }
+
+  function load(){
+    msg(""); conf();
+    api("/admin/list").then(function(j){
+      var h = "";
+      j.shops.forEach(function(s){
+        h += "<tr><td><b class='ltr'>" + esc(s.id) + "</b></td><td>" + esc(s.name) + "</td>" +
+          "<td class='" + (s.active ? "ok" : "bad") + "'>" + (s.active ? "فعّال" : "متوقف") + "</td>" +
+          "<td>" + s.devices + " / <input type='number' min='1' max='100' value='" + s.max_devices + "' style='width:64px;min-height:32px;padding:3px' data-md='" + esc(s.id) + "'></td>" +
+          "<td>" + s.records + "</td><td><small>" + esc(when(s.last_sync)) + "</small></td>" +
+          "<td>" +
+            "<button data-a='toggle' data-id='" + esc(s.id) + "' data-v='" + (s.active ? 0 : 1) + "'>" + (s.active ? "إيقاف" : "تفعيل") + "</button> " +
+            "<button data-a='md' data-id='" + esc(s.id) + "'>حفظ العدد</button> " +
+            "<button data-a='key' data-id='" + esc(s.id) + "'>مفتاح جديد</button> " +
+            "<button data-a='dev' data-id='" + esc(s.id) + "'>تصفير الأجهزة</button>" +
+          "</td></tr>";
+      });
+      $("list").innerHTML = h || "<tr><td colspan='7'><small>لا توجد متاجر بعد.</small></td></tr>";
+    }).catch(fail);
+  }
+
+  $("connect").onclick = load;
+  $("create").onclick = function(){
+    msg(""); conf();
+    api("/admin/create", {name: $("nm").value.trim(), max_devices: parseInt($("md").value, 10) || 5}).then(function(j){
+      var b = $("created");
+      b.style.display = "block";
+      b.innerHTML = "<div>تم إنشاء المتجر. احفظ البيانات التالية الآن (المفتاح لا يظهر مرة أخرى):</div>" +
+        "<p>عنوان الخادم: <b class='ltr'>" + esc(url) + "</b></p>" +
+        "<p>رمز المتجر: <span class='big ltr'>" + esc(j.id) + "</span></p>" +
+        "<p>المفتاح: <span class='big ltr'>" + esc(j.key) + "</span></p>" +
+        "<button id='cp'>نسخ البيانات</button>";
+      $("cp").onclick = function(){
+        var t = "عنوان الخادم: " + url + "\nرمز المتجر: " + j.id + "\nالمفتاح: " + j.key;
+        if(navigator.clipboard) navigator.clipboard.writeText(t);
+        $("cp").textContent = "تم النسخ";
+      };
+      load();
+    }).catch(fail);
+  };
+  $("list").onclick = function(e){
+    var t = e.target; if(t.tagName !== "BUTTON") return;
+    var a = t.getAttribute("data-a"), id = t.getAttribute("data-id");
+    msg("");
+    if(a === "toggle"){
+      api("/admin/update", {id: id, active: t.getAttribute("data-v") === "1"}).then(load).catch(fail);
+    } else if(a === "md"){
+      var v = document.querySelector("[data-md='" + id + "']").value;
+      api("/admin/update", {id: id, max_devices: parseInt(v, 10) || 1}).then(load).catch(fail);
+    } else if(a === "key"){
+      if(!confirm("سيتوقف كل الأجهزة المرتبطة حتى تُدخل المفتاح الجديد. متابعة؟")) return;
+      api("/admin/reset-key", {id: id}).then(function(j){
+        var b = $("created"); b.style.display = "block";
+        b.innerHTML = "<p>المفتاح الجديد للمتجر <b class='ltr'>" + esc(j.id) + "</b>: <span class='big ltr'>" + esc(j.key) + "</span></p>";
+        window.scrollTo(0, 0);
+      }).catch(fail);
+    } else if(a === "dev"){
+      if(!confirm("سيُسمح بتسجيل أجهزة جديدة برموز جديدة. الأجهزة الحالية ستحتاج إعادة ربط. متابعة؟")) return;
+      api("/admin/reset-devices", {id: id}).then(load).catch(fail);
+    }
+  };
+  if(url && sec) load();
+})();
+</script>
+</body>
+</html>
